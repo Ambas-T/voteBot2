@@ -13,7 +13,7 @@
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import type { BrowserContext, Page } from 'playwright-core';
+import type { BrowserContext, Page, Response } from 'playwright-core';
 import { generateEthiopianName } from './names';
 import { getTempMailbox, waitForVerificationLink } from './tenminute';
 
@@ -115,6 +115,33 @@ async function snap(page: Page, label: string) {
 
 type SignupResult = 'ok' | 'already' | 'verify-needed' | 'fail';
 
+/** Log creativeaward POST responses during signup (real error often only appears here). */
+function attachSignupPostLogger(page: Page, log: (m: string) => void): () => Promise<void> {
+  const pending: Promise<void>[] = [];
+  const handler = (res: Response) => {
+    if (res.request().method() !== 'POST') return;
+    const u = res.url();
+    if (!u.includes('creativeaward.ai')) return;
+    if (/\.(js|css|png|jpe?g|gif|webp|svg|woff2?|ico)(\?|$)/i.test(u)) return;
+    pending.push(
+      (async () => {
+        try {
+          const txt = await res.text();
+          const one = txt.replace(/\s+/g, ' ').slice(0, 500);
+          log(`[signup-api] HTTP ${res.status()} ${res.url()}\n  → ${one}`);
+        } catch {
+          log(`[signup-api] HTTP ${res.status()} ${res.url()} (body not readable)`);
+        }
+      })(),
+    );
+  };
+  page.on('response', handler);
+  return async () => {
+    await Promise.all(pending).catch(() => undefined);
+    page.off('response', handler);
+  };
+}
+
 async function signup(
   page: Page,
   email: string,
@@ -125,6 +152,8 @@ async function signup(
   log(`Signing up: ${email} (${firstName} ${lastName})`);
   await page.goto(SIGNUP_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   if (!await waitForCheckpoint(page, log, '#name, input[type="email"]')) return 'fail';
+
+  const detachPosts = attachSignupPostLogger(page, log);
 
   try {
     const fullName = `${firstName} ${lastName}`.trim();
@@ -162,6 +191,14 @@ async function signup(
     const body = (await page.innerText('body').catch(() => '')).toLowerCase();
     log(`[signup-debug] url=${url}  body(100)="${body.slice(0, 100).replace(/\n/g, ' ')}"`);
 
+    // Inline / toast errors (often not in first 100 chars of body)
+    const alertTexts = await page
+      .locator('[role="alert"], [data-slot="toast-description"], .text-destructive, [class*="error" i]')
+      .allInnerTexts()
+      .catch(() => [] as string[]);
+    const joinedAlerts = alertTexts.map(t => t.trim()).filter(Boolean).join(' | ');
+    if (joinedAlerts) log(`[signup-ui] ${joinedAlerts.slice(0, 500)}`);
+
     if (isUnhydratedPage(body)) {
       await snap(page, 'signup-blocked');
       log('Signup response blocked — page did not hydrate (Vercel checkpoint)');
@@ -194,9 +231,31 @@ async function signup(
       return 'already';
     }
 
-    if (body.includes('signup failed') || body.includes('registration failed') || body.includes('try again later')) {
+    const disposablePatterns = [
+      'disposable', 'temporary email', 'invalid email', 'email not allowed',
+      'blocked email', 'provider not allowed', 'use a different email',
+    ];
+    if (disposablePatterns.some(p => body.includes(p) || joinedAlerts.toLowerCase().includes(p))) {
+      await snap(page, 'signup-disposable');
+      log('Signup rejected — disposable / blocked email domain (try another inbox provider)');
+      return 'fail';
+    }
+
+    const serverRejectPatterns: [string, string][] = [
+      ['signup failed', 'signup failed'],
+      ['registration failed', 'registration failed'],
+      ['try again later', 'try again later'],
+      ['too many requests', 'rate limit'],
+      ['access denied', 'access denied'],
+    ];
+    const matchedReject = serverRejectPatterns.find(([needle]) => body.includes(needle));
+    if (matchedReject) {
       await snap(page, 'signup-rejected');
-      log('Signup rejected by server (likely rate-limited)');
+      log(
+        `Signup rejected (matched "${matchedReject[1]}" in page text). ` +
+          `If this persists on Railway with 1 worker, the host IP or email domain is likely blocked — use PROXY_MODE=proxies or run locally. ` +
+          `body(800)=${body.slice(0, 800).replace(/\n/g, ' ')}`,
+      );
       return 'fail';
     }
 
@@ -206,11 +265,15 @@ async function signup(
     }
 
     await snap(page, 'signup-fail');
-    log(`Signup may have failed — URL: ${url} — body: ${body.slice(0, 300)}`);
+    log(
+      `Signup may have failed — still on /signup. body(800)=${body.slice(0, 800).replace(/\n/g, ' ')}`,
+    );
     return 'fail';
   } catch (err) {
     log(`Signup error: ${err}`);
     return 'fail';
+  } finally {
+    await detachPosts();
   }
 }
 

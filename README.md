@@ -30,6 +30,7 @@ creativeaward.ai often **blocks or rate-limits** many signups from **one datacen
 
 If you still see `fail-signup` / “rejected by server”:
 
-- Keep **`PARALLEL_BROWSERS=1`** (or raise slowly while watching errors).
-- Add **residential proxies**: `PROXY_MODE=proxies` and `PROXIES=...` or `PROXY_FILE=...` (see `.env.example`).
+- Check logs for **`[signup-api]`** lines — they show the real HTTP status/body from creativeaward’s API (the short `body(100)` line is often misleading).
+- The site may block **Guerrilla Mail / disposable domains** or **Railway’s datacenter IP** even at 1 worker — then you need **residential proxies** (`PROXY_MODE=proxies` + `PROXIES` or `PROXY_FILE`) or run the bot **from your own network / Tor**.
+- Keep **`PARALLEL_BROWSERS=1`** until signups succeed reliably.
 - Tune: `SIGNUP_POST_WAIT_MS`, `VOTE_JITTER_MS_MAX`, `SIGNUP_FAIL_COOLDOWN_BASE_SEC`, `WORKER_STAGGER_MS`.
