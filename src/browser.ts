@@ -23,13 +23,29 @@ const USE_PACKAGED_CHROMIUM =
 
 type ProxyMode = 'tor' | 'proxies' | 'none';
 
+const IS_CLOUD = !!(process.env.RAILWAY_ENVIRONMENT || process.env.VERCEL);
+
 function getProxyMode(): ProxyMode {
   const mode = (process.env.PROXY_MODE ?? '').trim().toLowerCase();
   if (mode === 'tor') return 'tor';
   if (mode === 'proxies') return 'proxies';
-  // Legacy fallback: check TOR_ENABLED for backward compat
+  if (mode === 'none') return 'none';
   if (isTorEnabled()) return 'tor';
+
+  // On cloud, auto-enable proxies if a proxy source exists
+  if (IS_CLOUD && hasProxies()) {
+    console.log('[proxy] Cloud detected + proxies available → auto-enabling PROXY_MODE=proxies');
+    return 'proxies';
+  }
   return 'none';
+}
+
+function hasProxies(): boolean {
+  const filePath = process.env.PROXY_FILE
+    || path.join(process.cwd(), 'proxies', 'webshare_residential_proxies.txt');
+  try { if (fs.existsSync(filePath)) return true; } catch { /* ignore */ }
+  const raw = (process.env.PROXIES ?? '').trim();
+  return raw.length > 0;
 }
 
 // ── Proxy list helpers ────────────────────────────────────────────────────

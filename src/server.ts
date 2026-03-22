@@ -16,7 +16,7 @@ import express from 'express';
 import path from 'path';
 import type { Request, Response } from 'express';
 import { launchSession } from './browser';
-import { isTorEnabled, rotateTorIP, waitForNewCircuit } from './tor';
+import { isTorEnabled } from './tor';
 import { runVoteSession, SUBMISSION_URL } from './voter';
 
 const app  = express();
@@ -191,7 +191,7 @@ app.post('/api/vote/start', async (req: Request, res: Response) => {
               broadcastLog(`[W${workerId}] ❌ [${voteIdx + 1}/${count}] Failed (${result})${email ? ` — ${email}` : ''}`);
               if (result === 'fail-signup') {
                 const wait = SIGNUP_FAIL_COOLDOWN_BASE_SEC + workerId * 3;
-                broadcastLog(`[W${workerId}] Signup rate-limited — cooling ${wait}s…`);
+                broadcastLog(`[W${workerId}] Signup failed — cooling ${wait}s before retry…`);
                 await new Promise(r => setTimeout(r, wait * 1000));
               }
             }

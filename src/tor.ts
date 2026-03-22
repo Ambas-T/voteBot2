@@ -149,15 +149,15 @@ export async function waitForNewCircuit(ms = 15_000): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Fetch our current exit IP through the Tor SOCKS proxy. */
-export async function checkTorIP(log: Logger = noop): Promise<string | null> {
+/** Fetch the host's public IP (NOT through Tor — Node fetch doesn't use SOCKS). */
+export async function checkPublicIP(log: Logger = noop): Promise<string | null> {
   try {
     const resp = await fetch('https://api.ipify.org?format=text', { signal: AbortSignal.timeout(10_000) });
     const ip = (await resp.text()).trim();
-    log(`[tor] Current exit IP: ${ip}`);
+    log(`[net] Public IP: ${ip}`);
     return ip;
   } catch {
-    log('[tor] Could not determine exit IP');
+    log('[net] Could not determine public IP');
     return null;
   }
 }

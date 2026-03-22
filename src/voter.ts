@@ -68,11 +68,11 @@ async function waitForCheckpoint(
     await snap(page, 'checkpoint-timeout');
 
     if (body.includes('failed to verify') || body.includes('security checkpoint') || body.includes('code 21')) {
-      log('Vercel checkpoint blocked this IP');
+      log('Security checkpoint blocked this IP');
       return false;
     }
     if (body.includes('verifying your browser')) {
-      log('Checkpoint still verifying — waiting 8s more…');
+      log('Browser verification in progress — waiting 8s more…');
       await page.waitForTimeout(8000);
       try {
         await page.waitForSelector(waitForSelector, { state: 'visible', timeout: 10_000 });
@@ -91,7 +91,8 @@ async function waitForCheckpoint(
 // ── Screenshot helper ────────────────────────────────────────────────────────
 
 function resolveShotDir(): string {
-  const candidates = process.env.VERCEL
+  const isCloud = !!(process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT);
+  const candidates = isCloud
     ? [path.join(os.tmpdir(), 'votebot-screenshots')]
     : [path.join(process.cwd(), 'screenshots'), path.join(os.tmpdir(), 'votebot-screenshots')];
   for (const dir of candidates) {
@@ -201,7 +202,7 @@ async function signup(
 
     if (isUnhydratedPage(body)) {
       await snap(page, 'signup-blocked');
-      log('Signup response blocked — page did not hydrate (Vercel checkpoint)');
+      log('Signup response blocked — page did not hydrate (security checkpoint or JS not loaded)');
       return 'fail';
     }
 
