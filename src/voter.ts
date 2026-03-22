@@ -25,6 +25,15 @@ const LOGIN_URL  = 'https://www.creativeaward.ai/login?callbackUrl=%2Fmy-submiss
 
 const PASSWORD = process.env.ACCOUNT_PASSWORD?.replace(/^"|"$/g, '') ?? 'ta123#$55';
 
+const IS_CLOUD = !!(process.env.RAILWAY_ENVIRONMENT || process.env.VERCEL);
+/** After signup submit, wait for API + React before reading body (cloud is slower / stricter) */
+const SIGNUP_POST_WAIT_MS = parseInt(
+  process.env.SIGNUP_POST_WAIT_MS ?? (IS_CLOUD ? '12000' : '4000'),
+  10,
+);
+/** Random 0…N ms before each vote session on cloud to spread signups (0 = off) */
+const VOTE_JITTER_MS_MAX = parseInt(process.env.VOTE_JITTER_MS_MAX ?? (IS_CLOUD ? '20000' : '0'), 10);
+
 /**
  * Detect when the page HTML loaded but React/Next.js never hydrated.
  * The body text will be the inline theme-script blob rather than real content.
@@ -147,7 +156,7 @@ async function signup(
 
     await page.waitForTimeout(400);
     await page.locator('button[type="submit"], input[type="submit"]').first().click();
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(SIGNUP_POST_WAIT_MS);
 
     const url  = page.url();
     const body = (await page.innerText('body').catch(() => '')).toLowerCase();
@@ -364,6 +373,14 @@ export async function runVoteSession(
   try {
     // 0. Clear previous session so signup page renders fresh
     await context.clearCookies();
+
+    if (VOTE_JITTER_MS_MAX > 0) {
+      const ms = Math.floor(Math.random() * (VOTE_JITTER_MS_MAX + 1));
+      if (ms > 0) {
+        log(`Spreading load — random wait ${(ms / 1000).toFixed(1)}s…`);
+        await new Promise(r => setTimeout(r, ms));
+      }
+    }
 
     // 1. Get temp mailbox via mail.tm API — server-side, never touches the Tor proxy
     let mailbox: Awaited<ReturnType<typeof getTempMailbox>>;

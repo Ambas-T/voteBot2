@@ -22,10 +22,30 @@ import { runVoteSession, SUBMISSION_URL } from './voter';
 const app  = express();
 const PORT = parseInt(process.env.PORT ?? process.env.UI_PORT ?? '3000', 10);
 
-const VOTES_PER_SESSION  = parseInt(process.env.VOTES_PER_SESSION ?? '3', 10);
-const PARALLEL_BROWSERS  = parseInt(process.env.PARALLEL_BROWSERS ?? '5', 10);
+/** Vercel / Railway: one egress IP → parallel signups look like abuse; use gentler defaults unless env overrides */
+const IS_CLOUD = !!(process.env.RAILWAY_ENVIRONMENT || process.env.VERCEL);
+
+function envInt(name: string, cloudDefault: number, localDefault: number): number {
+  const raw = process.env[name];
+  if (raw !== undefined && String(raw).trim() !== '') {
+    const n = parseInt(String(raw), 10);
+    return Number.isFinite(n) ? n : (IS_CLOUD ? cloudDefault : localDefault);
+  }
+  return IS_CLOUD ? cloudDefault : localDefault;
+}
+
+const VOTES_PER_SESSION = envInt('VOTES_PER_SESSION', 1, 3);
+const PARALLEL_BROWSERS = envInt('PARALLEL_BROWSERS', 1, 5);
+/** Delay between starting worker 1, 2, … (ms) */
+const WORKER_STAGGER_MS = envInt('WORKER_STAGGER_MS', 8000, 2000);
+/** Base seconds after fail-signup before next attempt (+ workerId×3) */
+const SIGNUP_FAIL_COOLDOWN_BASE_SEC = envInt('SIGNUP_FAIL_COOLDOWN_BASE_SEC', 45, 10);
+
 const PROXY_MODE = (process.env.PROXY_MODE ?? '').trim().toLowerCase() || (isTorEnabled() ? 'tor' : 'none');
-console.log(`[config] PROXY_MODE=${PROXY_MODE}  VOTES_PER_SESSION=${VOTES_PER_SESSION}  PARALLEL=${PARALLEL_BROWSERS}`);
+console.log(
+  `[config] cloud=${IS_CLOUD} PROXY_MODE=${PROXY_MODE} VOTES_PER_SESSION=${VOTES_PER_SESSION} ` +
+    `PARALLEL=${PARALLEL_BROWSERS} WORKER_STAGGER_MS=${WORKER_STAGGER_MS} SIGNUP_COOLDOWN_BASE=${SIGNUP_FAIL_COOLDOWN_BASE_SEC}s`,
+);
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(process.cwd(), 'ui')));
@@ -170,7 +190,7 @@ app.post('/api/vote/start', async (req: Request, res: Response) => {
               state.failed++;
               broadcastLog(`[W${workerId}] ❌ [${voteIdx + 1}/${count}] Failed (${result})${email ? ` — ${email}` : ''}`);
               if (result === 'fail-signup') {
-                const wait = 10 + workerId * 3;
+                const wait = SIGNUP_FAIL_COOLDOWN_BASE_SEC + workerId * 3;
                 broadcastLog(`[W${workerId}] Signup rate-limited — cooling ${wait}s…`);
                 await new Promise(r => setTimeout(r, wait * 1000));
               }
@@ -193,7 +213,7 @@ app.post('/api/vote/start', async (req: Request, res: Response) => {
 
     broadcastLog(`Launching ${PARALLEL_BROWSERS} parallel workers (${VOTES_PER_SESSION} votes/browser)…`);
     const workers = Array.from({ length: PARALLEL_BROWSERS }, (_, i) =>
-      new Promise(r => setTimeout(r, i * 2000)).then(() => worker(i + 1)),
+      new Promise(r => setTimeout(r, i * WORKER_STAGGER_MS)).then(() => worker(i + 1)),
     );
     await Promise.all(workers);
 

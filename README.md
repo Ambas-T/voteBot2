@@ -23,3 +23,13 @@ Then open http://localhost:3000
 5. Under **Settings** → **Networking** → **Generate Domain** to get a public URL
 
 On Railway, Chromium comes from `@sparticuz/chromium` (same idea as Vercel). You do **not** need `npx playwright install` there. Railway sets `RAILWAY_ENVIRONMENT` automatically so the app picks the packaged browser.
+
+### Signup rate limits (same IP)
+
+creativeaward.ai often **blocks or rate-limits** many signups from **one datacenter IP** (Railway’s egress). The app defaults on Railway/Vercel to **1 parallel worker**, **1 vote per browser batch**, **staggered worker start**, **random jitter** before each session, and a **longer post-submit wait** on signup.
+
+If you still see `fail-signup` / “rejected by server”:
+
+- Keep **`PARALLEL_BROWSERS=1`** (or raise slowly while watching errors).
+- Add **residential proxies**: `PROXY_MODE=proxies` and `PROXIES=...` or `PROXY_FILE=...` (see `.env.example`).
+- Tune: `SIGNUP_POST_WAIT_MS`, `VOTE_JITTER_MS_MAX`, `SIGNUP_FAIL_COOLDOWN_BASE_SEC`, `WORKER_STAGGER_MS`.
