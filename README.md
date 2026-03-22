@@ -21,3 +21,5 @@ Then open http://localhost:3000
    - `GROQ_API_KEY` — (optional) for Ethiopian name generation
    - `TOR_ENABLED` — set to `false` on Railway (no Tor daemon)
 5. Under **Settings** → **Networking** → **Generate Domain** to get a public URL
+
+On Railway, Chromium comes from `@sparticuz/chromium` (same idea as Vercel). You do **not** need `npx playwright install` there. Railway sets `RAILWAY_ENVIRONMENT` automatically so the app picks the packaged browser.

@@ -1,19 +1,23 @@
 /**
  * Browser / context factory.
  *
- * LOCAL  (no VERCEL env)  — playwright-extra + puppeteer-stealth + local Chromium
- * VERCEL (VERCEL=1)       — playwright-core  + @sparticuz/chromium (serverless binary)
+ * LOCAL  (no cloud env)   — playwright + local Chromium (npx playwright install chromium)
+ * VERCEL / RAILWAY      — playwright-core + @sparticuz/chromium (bundled Linux binary)
  *
- * Note: after running `npm install`, do ONE of:
+ * Note: after `npm install`:
  *   Local dev  → npx playwright install chromium
- *   Vercel     → nothing extra (chromium downloaded at runtime via @sparticuz/chromium)
+ *   Vercel/Railway → nothing extra (@sparticuz/chromium supplies Chromium)
  */
 
 import path from 'path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { isTorEnabled, getTorProxyUrl } from './tor';
 
-const IS_VERCEL = !!process.env.VERCEL;
+/** Server/container hosts without Playwright’s downloaded browsers — use packaged Chromium */
+const USE_PACKAGED_CHROMIUM =
+  !!process.env.VERCEL ||
+  !!process.env.RAILWAY_ENVIRONMENT ||
+  process.env.USE_SPARTICUZ_CHROMIUM === 'true';
 
 // ── Proxy mode ────────────────────────────────────────────────────────────
 
@@ -121,23 +125,35 @@ export interface BrowserSession {
 }
 
 export async function launchSession(opts?: { headless?: boolean }): Promise<BrowserSession> {
-  // ── Vercel / serverless path ─────────────────────────────────────────────
-  if (IS_VERCEL) {
+  // ── Vercel / Railway / other headless Linux hosts (no Playwright browser cache) ─
+  if (USE_PACKAGED_CHROMIUM) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const chromiumSparticuz = require('@sparticuz/chromium');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { chromium } = require('playwright-core');
 
     const executablePath: string = await chromiumSparticuz.executablePath();
-    console.log(`[browser] Vercel — chromium at ${path.basename(executablePath)}`);
+    const host = process.env.VERCEL ? 'Vercel' : process.env.RAILWAY_ENVIRONMENT ? 'Railway' : 'packaged';
+    console.log(`[browser] ${host} — chromium at ${path.basename(executablePath)}`);
+
+    let proxy: PlaywrightProxy | undefined;
+    const mode = getProxyMode();
+    if (mode === 'tor') {
+      const torUrl = getTorProxyUrl();
+      console.log(`[browser] Tor → ${torUrl}`);
+      proxy = { server: torUrl };
+    } else if (mode === 'proxies') {
+      proxy = pickProxy();
+    }
 
     const browser: Browser = await chromium.launch({
       args: chromiumSparticuz.args as string[],
       executablePath,
       headless: true,
+      ...(proxy ? { proxy: { server: proxy.server } } : {}),
     });
 
-    const context: BrowserContext = await browser.newContext(contextOptions());
+    const context: BrowserContext = await browser.newContext(contextOptions(proxy));
     await applyStealthScript(context);
     const page: Page = await context.newPage();
     return { browser, context, page };
